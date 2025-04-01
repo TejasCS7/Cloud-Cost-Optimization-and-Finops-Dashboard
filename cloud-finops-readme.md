@@ -1,10 +1,5 @@
 # 💸 Cloud FinOps Optimization Dashboard
 
-![Python](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/c7a122deb6b43cdf92de2cb67ce571f4f6b2bd0b/Python-Logo.png)
-![PostgreSQL](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/0f8b53c413d7a51dd9bfffa13eb5b96c43b345da/png-clipart-postgresql-database-logo-application-software-computer-software-mysql-logo-blue-text.png))
-![Flask](https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.klipartz.com%2Fen%2Fsticker-png-rbwua&psig=AOvVaw26Tt702zLLgSGYM31G7cHd&ust=1743317891171000&source=images&cd=vfe&opi=89978449&ved=0CBQQjRxqFwoTCKjin7TbrowDFQAAAAAdAAAAABAE)
-
-
 ## 🚀 Executive Summary
 
 A cutting-edge Cloud Cost Optimization platform designed to transform FinOps strategies through intelligent data processing, predictive analytics, and interactive visualization. Built to deliver measurable cloud spending insights for enterprise-level decision-making.
