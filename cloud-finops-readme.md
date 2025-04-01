@@ -1,5 +1,7 @@
 # 💸 Cloud FinOps Optimization Dashboard
 
+![animation](https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.startuphub.ai%2Ffinout-secures-26-million-series-b-to-revolutionize-finops%2F&psig=AOvVaw1fjBjnk5bpDxDWuns5dXtu&ust=1743593425925000&source=images&cd=vfe&opi=89978449&ved=0CBMQjRxqFwoTCJCbyOzdtowDFQAAAAAdAAAAABAE)
+
 ## 🚀 Executive Summary
 
 A cutting-edge Cloud Cost Optimization platform designed to transform FinOps strategies through intelligent data processing, predictive analytics, and interactive visualization. Built to deliver measurable cloud spending insights for enterprise-level decision-making.
