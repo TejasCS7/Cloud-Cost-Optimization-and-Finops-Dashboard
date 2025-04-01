@@ -1,6 +1,6 @@
 # 💸 Cloud FinOps Optimization Dashboard
 
-![animation](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/0375c8548bcda192ceade9d7d6c3393cdc7aa397/chrome-capture-2024-5-23-ezgif.com-resize.gif))
+![animation](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/0375c8548bcda192ceade9d7d6c3393cdc7aa397/chrome-capture-2024-5-23-ezgif.com-resize.gif)
 
 ## 🚀 Executive Summary
 
