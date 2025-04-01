@@ -1,6 +1,6 @@
 # 💸 Cloud FinOps Optimization Dashboard
 
-![animation]([https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.startuphub.ai%2Ffinout-secures-26-million-series-b-to-revolutionize-finops%2F&psig=AOvVaw1fjBjnk5bpDxDWuns5dXtu&ust=1743593425925000&source=images&cd=vfe&opi=89978449&ved=0CBMQjRxqFwoTCJCbyOzdtowDFQAAAAAdAAAAABAE](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/0375c8548bcda192ceade9d7d6c3393cdc7aa397/chrome-capture-2024-5-23-ezgif.com-resize.gif))
+![animation](https://github.com/TejasCS7/Cloud-Cost-Optimization-and-Finops-Dashboard/blob/0375c8548bcda192ceade9d7d6c3393cdc7aa397/chrome-capture-2024-5-23-ezgif.com-resize.gif))
 
 ## 🚀 Executive Summary
 
