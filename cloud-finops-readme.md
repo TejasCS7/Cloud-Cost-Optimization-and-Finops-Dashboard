@@ -109,7 +109,7 @@ python src/main.py
 
 ## 👨‍💻 About the Developer
 
-**Tejas G**
+**Tejas Gaikawad**
 - 📍 Location: [Akola, Maharashtra]
 - 💼 Specialization: Cloud FinOps, Data Engineering, Businss Intelligence Analysis
 - 🔗 Connect: [LinkedIn](https://www.linkedin.com/in/tejas-gaikawad/) | [GitHub](https://github.com/TejasCS7)
