@@ -20,7 +20,6 @@ A cutting-edge Cloud Cost Optimization platform designed to transform FinOps str
 - **Breakthrough**: Identifies actionable cost-saving opportunities
 - **Potential Savings**: 
   - Idle Resource Elimination: Up to 33.9% cost reduction
-  - Resource Rightsizing: Up to 12.5% infrastructure savings
 - **Methodology**: Python-powered analysis of historical billing data
 
 ### 3. 🖥️ Interactive FinOps Dashboard
