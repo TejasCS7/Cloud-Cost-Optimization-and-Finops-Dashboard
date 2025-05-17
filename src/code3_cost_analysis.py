@@ -4,12 +4,7 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 import logging
 import math
-import csv
-from io import StringIO
-import sys
 import statistics
-import collections
-from itertools import islice
 
 # Set up logging
 logging.basicConfig(
@@ -27,7 +22,7 @@ class CloudCostOptimizer:
         self.db_config = db_config
         logger.info("Cost optimizer initialized")
         
-        # Dynamic thresholds for idle detection - New Feature #2
+        # Dynamic thresholds for idle detection
         self._initialize_dynamic_thresholds()
     
     def _initialize_dynamic_thresholds(self):
@@ -46,19 +41,16 @@ class CloudCostOptimizer:
                 cpu_values = [float(row['cpu_utilization']) for row in data]
                 memory_values = [float(row['memory_utilization']) for row in data]
                 
-                # Calculate mean and standard deviation
                 cpu_mean = statistics.mean(cpu_values) if cpu_values else 15
                 cpu_stdev = statistics.stdev(cpu_values) if len(cpu_values) > 1 else 5
                 memory_mean = statistics.mean(memory_values) if memory_values else 15
                 memory_stdev = statistics.stdev(memory_values) if len(memory_values) > 1 else 5
                 
-                # Set thresholds at mean - 1 standard deviation
                 self.idle_cpu_threshold = max(5, cpu_mean - cpu_stdev)
                 self.idle_memory_threshold = max(5, memory_mean - memory_stdev)
                 
                 logger.info(f"Dynamic thresholds initialized: CPU {self.idle_cpu_threshold:.2f}%, Memory {self.idle_memory_threshold:.2f}%")
             else:
-                # Default fallback if no data
                 self.idle_cpu_threshold = 15
                 self.idle_memory_threshold = 15
                 logger.warning("No utilization data found, using default thresholds")
@@ -69,7 +61,7 @@ class CloudCostOptimizer:
     
     def execute_query(self, query, params=None):
         """
-        Execute SQL query and return results as a list of dictionaries using psycopg2
+        Execute SQL query and return results as a list of dictionaries
         """
         conn = None
         try:
@@ -88,7 +80,7 @@ class CloudCostOptimizer:
     
     def get_resource_utilization(self):
         """
-        Get resource utilization metrics from the database and calculate in Python
+        Get resource utilization metrics from the database
         """
         query = """
         SELECT 
@@ -108,7 +100,6 @@ class CloudCostOptimizer:
         
         data = self.execute_query(query)
         
-        # Aggregate in Python
         utilization = {}
         for row in data:
             key = (row['resource_id'], row['service_name'], row['region_name'])
@@ -124,7 +115,6 @@ class CloudCostOptimizer:
             utilization[key]['hours'] += float(row['usage_duration_hours'])
             utilization[key]['days'].add(row['usage_start_date'].isoformat())
         
-        # Calculate averages
         result = []
         for (resource_id, service_name, region_name), metrics in utilization.items():
             avg_cpu = sum(metrics['cpu']) / len(metrics['cpu']) if metrics['cpu'] else 0
@@ -154,7 +144,7 @@ class CloudCostOptimizer:
             if (resource['avg_cpu'] < cpu_threshold and 
                 resource['avg_memory'] < memory_threshold and 
                 resource['total_cost'] > 100):
-                potential_savings = min(resource['total_cost'] * 0.8, resource['total_cost'])  # Cap at actual cost
+                potential_savings = min(resource['total_cost'] * 0.8, resource['total_cost'])
                 resource['potential_savings'] = potential_savings
                 idle_resources.append(resource)
                 total_potential_savings += potential_savings
@@ -164,7 +154,7 @@ class CloudCostOptimizer:
     
     def identify_rightsizing_opportunities(self):
         """
-        Identify resources that could be downsized based on utilization patterns in Python
+        Identify resources that could be downsized
         """
         query = """
         SELECT 
@@ -198,7 +188,7 @@ class CloudCostOptimizer:
             max_memory = max(metrics['memory']) if metrics['memory'] else 0
             total_cost = metrics['cost']
             if max_cpu < 50 and max_memory < 60:
-                potential_savings = min(total_cost * 0.4, total_cost)  # Cap at actual cost
+                potential_savings = min(total_cost * 0.4, total_cost)
                 rightsizing.append({
                     'resource_id': resource_id,
                     'service_name': service_name,
@@ -215,7 +205,7 @@ class CloudCostOptimizer:
     
     def analyze_regional_cost_distribution(self):
         """
-        Analyze cost distribution across different regions in Python
+        Analyze cost distribution across regions
         """
         query = """
         SELECT 
@@ -228,7 +218,6 @@ class CloudCostOptimizer:
         
         data = self.execute_query(query)
         
-        # Aggregate in Python
         regions = {}
         for row in data:
             region = row['region_name']
@@ -249,7 +238,7 @@ class CloudCostOptimizer:
     
     def find_cost_anomalies(self):
         """
-        Detect anomalous spending patterns with Python calculations
+        Detect anomalous spending patterns
         """
         query = """
         SELECT 
@@ -263,7 +252,6 @@ class CloudCostOptimizer:
         
         data = self.execute_query(query)
         
-        # Aggregate daily costs
         daily_costs = {}
         for row in data:
             key = (row['date'].isoformat(), row['service_name'])
@@ -271,14 +259,12 @@ class CloudCostOptimizer:
                 daily_costs[key] = 0
             daily_costs[key] += float(row['unrounded_cost'])
         
-        # Calculate stats per service
         service_stats = {}
         for (date, service), cost in daily_costs.items():
             if service not in service_stats:
                 service_stats[service] = []
             service_stats[service].append(cost)
         
-        # Calculate mean and standard deviation
         for service in service_stats:
             costs = service_stats[service]
             n = len(costs)
@@ -290,12 +276,11 @@ class CloudCostOptimizer:
             else:
                 service_stats[service] = {'avg_cost': 0, 'stddev_cost': 0, 'costs': []}
         
-        # Find anomalies
         anomalies = []
         for (date, service), daily_cost in daily_costs.items():
             stats = service_stats[service]
             z_score = (daily_cost - stats['avg_cost']) / stats['stddev_cost'] if stats['stddev_cost'] > 0 else 0
-            if abs(z_score) > 2 and daily_cost > 10:  # Significant anomaly and cost > $10
+            if abs(z_score) > 2 and daily_cost > 10:
                 anomalies.append({
                     'date': date,
                     'service_name': service,
@@ -310,12 +295,10 @@ class CloudCostOptimizer:
     
     def generate_optimization_recommendations(self):
         """
-        Generate comprehensive optimization recommendations in Python
+        Generate optimization recommendations
         """
         recommendations = []
         utilization_data = self.get_resource_utilization()
-
-        # Fetch the average cost threshold once, outside the loop
         avg_cost_query = "SELECT AVG(unrounded_cost) * 1.5 AS avg_cost FROM fact_billing"
         avg_cost_result = self.execute_query(avg_cost_query)
         avg_cost_threshold = float(avg_cost_result[0]['avg_cost'] or 0)
@@ -326,7 +309,6 @@ class CloudCostOptimizer:
             avg_memory = resource['avg_memory']
             active_days = resource['active_days']
             
-            # Match logic to fetch_optimization_recommendations
             if avg_cpu < 10:
                 savings = total_cost * 0.5
                 desc = f"Stop idle resource (low CPU usage: {avg_cpu:.1f}%). Impact: Minimal disruption."
@@ -346,14 +328,13 @@ class CloudCostOptimizer:
                 savings = total_cost * 0.15
                 desc = "Review usage patterns for optimization. Impact: Potential savings."
 
-            recommendations.append({
-                'resource_id': resource['resource_id'],
-                'recommendation_type': 'Cost Optimization',
-                'recommendation_description': desc,
-                'potential_savings': savings,
-                'implementation_difficulty': 'Medium',
-                'priority': 'High' if savings > 1000 else 'Medium'
-            })
+            if savings >= 10:
+                recommendations.append({
+                    'resource_id': resource['resource_id'],
+                    'recommendation_type': 'Cost Optimization',
+                    'recommendation_description': desc,
+                    'potential_savings': savings
+                })
 
         self.save_recommendations(recommendations)
         recommendations.sort(key=lambda x: x['potential_savings'], reverse=True)
@@ -362,7 +343,7 @@ class CloudCostOptimizer:
     
     def save_recommendations(self, recommendations):
         """
-        Save recommendations to database using psycopg2
+        Save recommendations to database
         """
         if not recommendations:
             return
@@ -396,12 +377,11 @@ class CloudCostOptimizer:
             raise
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
     def calculate_total_savings_potential(self):
         """
-        Calculate total potential savings across all recommendations in Python
+        Calculate total potential savings
         """
         recommendations = self.generate_optimization_recommendations()
         total_savings = sum(rec['potential_savings'] for rec in recommendations)
@@ -424,11 +404,10 @@ class CloudCostOptimizer:
     
     def generate_executive_summary(self):
         """
-        Generate an executive summary of cost optimization opportunities in Python
+        Generate executive summary
         """
         savings_data = self.calculate_total_savings_potential()
         
-        # Top services by cost
         query = """
         SELECT 
             s.service_name,
@@ -452,7 +431,6 @@ class CloudCostOptimizer:
             for k, v in sorted(services.items(), key=lambda x: x[1]['cost'], reverse=True)[:5]
         ]
         
-        # Monthly trend
         query = """
         SELECT 
             fb.unrounded_cost,
@@ -483,14 +461,11 @@ class CloudCostOptimizer:
         
         logger.info("Generated executive summary")
         return summary
-        
-    # NEW FEATURE #1: Predictive Cost Modeling
+    
     def predict_next_month_cost(self):
         """
-        Use simple time series forecasting to predict next month's costs
-        Using a linear regression approach with pure Python
+        Predict next month's costs using linear regression
         """
-        # Fetch historical monthly costs
         query = """
         SELECT 
             TO_CHAR(fb.usage_start_date, 'YYYY-MM') as month,
@@ -507,36 +482,30 @@ class CloudCostOptimizer:
                 logger.warning("Not enough historical data for prediction")
                 return None
             
-            # Extract month numbers and costs for simple linear regression
             months = []
             costs = []
             
             for i, row in enumerate(data):
-                months.append(i+1)  # Simple numeric index
+                months.append(i+1)
                 costs.append(float(row['monthly_cost']))
             
-            # Simple linear regression
             n = len(months)
             sum_x = sum(months)
             sum_y = sum(costs)
             sum_xy = sum(x*y for x, y in zip(months, costs))
             sum_xx = sum(x*x for x in months)
             
-            # Calculate slope and intercept
             slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x)
             intercept = (sum_y - slope * sum_x) / n
             
-            # Predict next month
             next_month = n + 1
             predicted_cost = slope * next_month + intercept
             
-            # Calculate simple confidence metrics
             average_cost = sum_y / n
             last_cost = costs[-1]
             last_month_name = data[-1]['month']
             trend_percentage = ((predicted_cost / last_cost) - 1) * 100
             
-            # Simple growth calculation
             month_over_month_changes = []
             for i in range(1, len(costs)):
                 if costs[i-1] > 0:
@@ -547,12 +516,13 @@ class CloudCostOptimizer:
             result = {
                 'last_month': last_month_name,
                 'last_month_cost': last_cost,
-                'predicted_next_month_cost': max(0, predicted_cost),  # Ensure no negative predictions
+                'predicted_next_month_cost': max(0, predicted_cost),
                 'trend_percentage': trend_percentage,
                 'average_monthly_growth_rate': avg_growth_rate * 100,
                 'prediction_confidence': 'medium' if len(data) >= 3 else 'low'
             }
             
+            logger.warning("Predictive model uses simple linear regression, which may not capture complex patterns")
             logger.info(f"Predicted next month's cost: ${result['predicted_next_month_cost']:.2f} ({result['trend_percentage']:.1f}% change)")
             return result
             
@@ -560,14 +530,10 @@ class CloudCostOptimizer:
             logger.error(f"Failed to predict costs: {str(e)}")
             return None
     
-    # NEW FEATURE #3: Benchmark Comparison
     def benchmark_cost_comparison(self):
         """
-        Compare costs against industry benchmarks for similar workloads
-        Using simple benchmark data defined within the function
+        Compare costs against industry benchmarks
         """
-        # Define industry benchmarks for different service types
-        # These would ideally come from a database, but for this example we'll define them here
         industry_benchmarks = {
             'Cloud Compute': {'cost_per_cpu_hour': 0.03, 'cost_per_memory_gb_hour': 0.004},
             'Cloud Storage': {'cost_per_gb_month': 0.02},
@@ -576,6 +542,7 @@ class CloudCostOptimizer:
             'Cloud Networking': {'cost_per_gb_transfer': 0.08},
             'Default': {'avg_utilization_threshold': 60, 'idle_threshold': 15}
         }
+        logger.warning("Using static industry benchmarks, which may not reflect current standards")
         
         try:
             query = """
@@ -595,7 +562,6 @@ class CloudCostOptimizer:
             benchmark_results = []
             for service in data:
                 service_name = service['service_name']
-                # Map to benchmark category based on keywords
                 if 'Compute' in service_name:
                     benchmark_category = 'Cloud Compute'
                 elif 'Storage' in service_name:
@@ -647,7 +613,6 @@ class CloudCostOptimizer:
                         })
                 else:
                     avg_cpu = float(service['avg_cpu']) if service['avg_cpu'] is not None else 0
-                    # Use 'avg_utilization_threshold' only if it exists, fallback to 60
                     threshold = benchmark.get('avg_utilization_threshold', 60)
                     benchmark_results.append({
                         'service_name': service_name,
@@ -670,17 +635,14 @@ class CloudCostOptimizer:
         except Exception as e:
             logger.error(f"Failed to perform benchmark comparison: {str(e)}")
             return None
-            
-    # NEW FEATURE #4: Smart Alerting System
+    
     def setup_cost_alerts(self):
         """
-        Create threshold-based alerts for cost spikes based on historical patterns
+        Create threshold-based alerts for cost spikes
         """
         try:
-            # Create alerts table if it doesn't exist
             self._create_alerts_table()
             
-            # Get historical cost data by service and day
             query = """
             SELECT 
                 s.service_name,
@@ -695,7 +657,6 @@ class CloudCostOptimizer:
             
             data = self.execute_query(query)
             
-            # Organize data by service
             service_costs = {}
             for row in data:
                 service = row['service_name']
@@ -706,24 +667,20 @@ class CloudCostOptimizer:
                     'cost': float(row['daily_cost'])
                 })
             
-            # Generate alerts for each service
             alerts = []
             for service, costs in service_costs.items():
-                if len(costs) < 7:  # Need at least a week of data
+                if len(costs) < 7:
                     continue
                     
-                # Calculate statistics
                 daily_costs = [c['cost'] for c in costs]
                 avg_cost = sum(daily_costs) / len(daily_costs)
                 variance = sum((x - avg_cost) ** 2 for x in daily_costs) / len(daily_costs)
                 stddev = math.sqrt(variance)
                 
-                # Set alert thresholds
-                regular_threshold = avg_cost + (2 * stddev)  # Medium alert
-                high_threshold = avg_cost + (3 * stddev)     # High alert
-                critical_threshold = avg_cost + (4 * stddev)  # Critical alert
+                regular_threshold = avg_cost + (2 * stddev)
+                high_threshold = avg_cost + (3 * stddev)
+                critical_threshold = avg_cost + (4 * stddev)
                 
-                # Configure dynamic alert
                 alerts.append({
                     'service_name': service,
                     'avg_daily_cost': avg_cost,
@@ -734,7 +691,6 @@ class CloudCostOptimizer:
                     'created_at': datetime.now()
                 })
             
-            # Save alerts to database
             self._save_alerts(alerts)
             
             logger.info(f"Set up {len(alerts)} cost alerts based on historical patterns")
@@ -746,14 +702,13 @@ class CloudCostOptimizer:
     
     def _create_alerts_table(self):
         """
-        Create the cost_alerts table if it doesn't exist
+        Create the cost_alerts table
         """
         conn = None
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Check if table exists
             cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -779,7 +734,6 @@ class CloudCostOptimizer:
                     );
                 """)
                 
-                # Create table for tracking alert violations
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS cost_alert_violations (
                         violation_id SERIAL PRIMARY KEY,
@@ -805,7 +759,6 @@ class CloudCostOptimizer:
             raise
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
     def _save_alerts(self, alerts):
@@ -820,10 +773,8 @@ class CloudCostOptimizer:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Deactivate existing alerts
             cursor.execute("UPDATE cost_alerts SET active = FALSE WHERE active = TRUE;")
             
-            # Insert new alerts
             for alert in alerts:
                 cursor.execute("""
                     INSERT INTO cost_alerts 
@@ -851,16 +802,13 @@ class CloudCostOptimizer:
             raise
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
     def check_for_cost_violations(self, check_date=None):
         """
-        Check for any cost alert violations on the specified date
-        If no date is provided, check the most recent date with data
+        Check for cost alert violations
         """
         if check_date is None:
-            # Get the most recent date with cost data
             query = "SELECT MAX(usage_start_date) as latest_date FROM fact_billing"
             result = self.execute_query(query)
             if not result or not result[0]['latest_date']:
@@ -869,7 +817,6 @@ class CloudCostOptimizer:
             check_date = result[0]['latest_date']
         
         try:
-            # Get active alerts
             query = "SELECT * FROM cost_alerts WHERE active = TRUE"
             alerts = self.execute_query(query)
             
@@ -877,7 +824,6 @@ class CloudCostOptimizer:
                 logger.warning("No active cost alerts found")
                 return []
             
-            # Get cost data for the date being checked
             query = """
             SELECT 
                 s.service_name,
@@ -889,13 +835,11 @@ class CloudCostOptimizer:
             """
             cost_data = self.execute_query(query, (check_date,))
             
-            # Check for violations
             violations = []
             for daily_cost in cost_data:
                 service = daily_cost['service_name']
                 actual_cost = float(daily_cost['daily_cost'])
                 
-                # Find matching alert
                 matching_alerts = [a for a in alerts if a['service_name'] == service]
                 if not matching_alerts:
                     continue
@@ -903,7 +847,6 @@ class CloudCostOptimizer:
                 alert = matching_alerts[0]
                 expected_cost = float(alert['avg_daily_cost'])
                 
-                # Check thresholds
                 threshold_exceeded = None
                 if actual_cost >= float(alert['critical_alert_threshold']):
                     threshold_exceeded = 'CRITICAL'
@@ -925,7 +868,6 @@ class CloudCostOptimizer:
                         'created_at': datetime.now()
                     })
             
-            # Save violations to database
             if violations:
                 self._save_violations(violations)
                 
@@ -975,20 +917,17 @@ class CloudCostOptimizer:
             raise
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
-    # NEW FEATURE #6: Recommendation Tracking
     def setup_recommendation_tracking(self):
         """
-        Set up database tables to track which recommendations were implemented and their actual savings
+        Set up tables to track recommendation implementation
         """
         conn = None
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Check if recommendation tracking table exists
             cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -1017,7 +956,6 @@ class CloudCostOptimizer:
                 conn.commit()
                 logger.info("Created recommendation_tracking table")
                 
-                # Initialize tracking for existing recommendations
                 cursor.execute("""
                     INSERT INTO recommendation_tracking
                     (recommendation_id, status, expected_savings, last_updated)
@@ -1041,12 +979,11 @@ class CloudCostOptimizer:
             return False
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
     def update_recommendation_status(self, recommendation_id, status, implemented_date=None, notes=None):
         """
-        Update the status of a recommendation in the tracking system
+        Update recommendation status
         """
         valid_statuses = ['PENDING', 'IMPLEMENTED', 'REJECTED', 'SCHEDULED', 'IN_PROGRESS']
         if status not in valid_statuses:
@@ -1058,7 +995,6 @@ class CloudCostOptimizer:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Get the recommendation details
             cursor.execute("""
                 SELECT potential_savings
                 FROM optimization_recommendations
@@ -1072,7 +1008,6 @@ class CloudCostOptimizer:
                 
             expected_savings = rec_data[0]
             
-            # Update the tracking record
             if status == 'IMPLEMENTED':
                 cursor.execute("""
                     UPDATE recommendation_tracking
@@ -1103,18 +1038,15 @@ class CloudCostOptimizer:
             return False
         finally:
             if conn:
-                cursor.close()
                 conn.close()
     
     def calculate_recommendation_roi(self, days_since_implementation=30):
         """
-        Calculate actual savings and ROI for implemented recommendations
+        Calculate savings and ROI for implemented recommendations
         """
         try:
-            # Setup tracking if not already done
             self.setup_recommendation_tracking()
             
-            # Get implemented recommendations
             query = """
             SELECT 
                 r.recommendation_id,
@@ -1137,11 +1069,9 @@ class CloudCostOptimizer:
                 
             results = []
             for rec in implemented_recs:
-                # Skip if no resource ID (e.g., general recommendations)
                 if rec['resource_id'] == 'N/A':
                     continue
                     
-                # Get baseline cost (before implementation)
                 before_query = """
                 SELECT AVG(daily_cost) as avg_cost
                 FROM (
@@ -1164,7 +1094,6 @@ class CloudCostOptimizer:
                 
                 before_avg = float(before_data[0]['avg_cost']) if before_data and before_data[0]['avg_cost'] else 0
                 
-                # Get current cost (after implementation)
                 after_query = """
                 SELECT AVG(daily_cost) as avg_cost
                 FROM (
@@ -1188,12 +1117,10 @@ class CloudCostOptimizer:
                 
                 after_avg = float(after_data[0]['avg_cost']) if after_data and after_data[0]['avg_cost'] else 0
                 
-                # Calculate actual savings
                 daily_savings = max(0, before_avg - after_avg)
                 actual_savings = daily_savings * days_since_implementation
                 expected_savings = float(rec['expected_savings']) if rec['expected_savings'] else 0
                 
-                # Calculate accuracy
                 accuracy = (actual_savings / expected_savings * 100) if expected_savings > 0 else 0
                 
                 result = {
@@ -1209,7 +1136,6 @@ class CloudCostOptimizer:
                 
                 results.append(result)
                 
-                # Update the tracking record with actual savings
                 conn = None
                 try:
                     conn = psycopg2.connect(**self.db_config)
@@ -1230,7 +1156,6 @@ class CloudCostOptimizer:
                     logger.error(f"Failed to update actual savings: {str(e)}")
                 finally:
                     if conn:
-                        cursor.close()
                         conn.close()
             
             logger.info(f"Calculated ROI for {len(results)} implemented recommendations")
@@ -1242,13 +1167,11 @@ class CloudCostOptimizer:
     
     def generate_implementation_impact_report(self):
         """
-        Generate a report showing the impact of implemented recommendations
+        Generate report on implemented recommendations
         """
         try:
-            # Get ROI data
             roi_data = self.calculate_recommendation_roi()
             
-            # Get recommendation status counts
             query = """
             SELECT 
                 status,
@@ -1260,7 +1183,6 @@ class CloudCostOptimizer:
             
             status_data = self.execute_query(query)
             
-            # Create status summary
             status_summary = {}
             for row in status_data:
                 status_summary[row['status']] = {
@@ -1268,7 +1190,6 @@ class CloudCostOptimizer:
                     'expected_savings': float(row['total_expected_savings']) if row['total_expected_savings'] else 0
                 }
                 
-            # Calculate implemented vs expected stats
             implemented_count = status_summary.get('IMPLEMENTED', {}).get('count', 0)
             total_count = sum(s.get('count', 0) for s in status_summary.values())
             implemented_percentage = (implemented_count / total_count) * 100 if total_count > 0 else 0
@@ -1277,7 +1198,6 @@ class CloudCostOptimizer:
             total_actual = sum(r['actual_savings'] for r in roi_data)
             savings_realization = (total_actual / total_expected) * 100 if total_expected > 0 else 0
             
-            # Generate report
             report = {
                 'status_summary': status_summary,
                 'recommendation_count': total_count,
@@ -1312,53 +1232,43 @@ def main():
     try:
         optimizer = CloudCostOptimizer(db_config)
         
-        # Initialize database tables for new features
         optimizer.setup_recommendation_tracking()
         optimizer._create_alerts_table()
         
-        # Run existing optimization analysis
         recommendations = optimizer.generate_optimization_recommendations()
-        print(f"Generated {len(recommendations)} cost optimization recommendations")
+        logger.info(f"Generated {len(recommendations)} cost optimization recommendations")
         
         savings_data = optimizer.calculate_total_savings_potential()
-        print(f"Potential savings: ${savings_data['potential_savings']:.2f} ({savings_data['savings_percentage']:.1f}%)")
+        logger.info(f"Potential savings: ${savings_data['potential_savings']:.2f} ({savings_data['savings_percentage']:.1f}%)")
         
-        # Run new features
-        print("\n=== New Features ===")
+        logger.info("=== New Features ===")
         
-        # 1. Predictive cost modeling
         next_month_prediction = optimizer.predict_next_month_cost()
         if next_month_prediction:
-            print(f"Predicted next month cost: ${next_month_prediction['predicted_next_month_cost']:.2f}")
-            print(f"Trend: {next_month_prediction['trend_percentage']:.1f}% change from previous month")
+            logger.info(f"Predicted next month cost: ${next_month_prediction['predicted_next_month_cost']:.2f}")
+            logger.info(f"Trend: {next_month_prediction['trend_percentage']:.1f}% change from previous month")
         
-        # 2. Dynamic thresholds - already integrated into idle resource detection
-        print(f"Using dynamic thresholds for idle detection - CPU: {optimizer.idle_cpu_threshold:.1f}%, Memory: {optimizer.idle_memory_threshold:.1f}%")
+        logger.info(f"Using dynamic thresholds for idle detection - CPU: {optimizer.idle_cpu_threshold:.1f}%, Memory: {optimizer.idle_memory_threshold:.1f}%")
         
-        # 3. Benchmark comparison
         benchmark_data = optimizer.benchmark_cost_comparison()
         if benchmark_data:
-            print(f"Benchmark comparison completed, identified ${benchmark_data['total_potential_savings']:.2f} in potential savings")
+            logger.info(f"Benchmark comparison completed, identified ${benchmark_data['total_potential_savings']:.2f} in potential savings")
             
-        # 4. Smart alerting system
         alerts = optimizer.setup_cost_alerts()
-        print(f"Set up {len(alerts)} cost alerts based on historical patterns")
+        logger.info(f"Set up {len(alerts)} cost alerts based on historical patterns")
         
         violations = optimizer.check_for_cost_violations()
-        print(f"Found {len(violations)} cost alert violations")
+        logger.info(f"Found {len(violations)} cost alert violations")
         
-        # 6. Recommendation tracking
         impact_report = optimizer.generate_implementation_impact_report()
         if impact_report:
             implemented = impact_report.get('implemented_count', 0)
             total = impact_report.get('recommendation_count', 0)
-            print(f"Implementation status: {implemented}/{total} recommendations implemented")
-            print(f"Actual savings: ${impact_report.get('total_actual_savings', 0):.2f}")
+            logger.info(f"Implementation status: {implemented}/{total} recommendations implemented")
+            logger.info(f"Actual savings: ${impact_report.get('total_actual_savings', 0):.2f}")
         
-        # Generate enhanced executive summary
         summary = optimizer.generate_executive_summary()
         
-        # Add new feature data to the summary
         enhanced_summary = {
             **summary,
             'cost_prediction': next_month_prediction,
@@ -1370,13 +1280,12 @@ def main():
         with open('enhanced_executive_summary.json', 'w') as f:
             json.dump(enhanced_summary, f, indent=2)
         
-        print("\nEnhanced executive summary saved to enhanced_executive_summary.json")
+        logger.info("Enhanced executive summary saved to enhanced_executive_summary.json")
         return recommendations, enhanced_summary
         
     except Exception as e:
         logger.error(f"Error during optimization analysis: {str(e)}")
-        print(f"Error: {str(e)}")
-        sys.exit(1)
+        return None, None
 
 if __name__ == "__main__":
     main()
