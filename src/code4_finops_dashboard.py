@@ -1,11 +1,18 @@
-from venv import logger
+import logging
 from flask import Flask, render_template_string, request
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import calendar
-import random
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler('dashboard.log'), logging.StreamHandler()]
+)
+logger = logging.getLogger('dashboard')
 
 app = Flask(__name__)
 
@@ -37,8 +44,9 @@ def get_month_name(month_str):
         return month_str
 
 def execute_query(query, db_config, params=None):
-    conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
+    conn = None
     try:
+        conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
         cursor = conn.cursor()
         if params:
             cursor.execute(query, params)
@@ -46,9 +54,13 @@ def execute_query(query, db_config, params=None):
             cursor.execute(query)
         results = [dict(row) for row in cursor.fetchall()]
         return results
+    except Exception as e:
+        logger.error(f"Query execution failed: {str(e)}")
+        raise
     finally:
-        cursor.close()
-        conn.close()
+        if conn:
+            cursor.close()
+            conn.close()
 
 def fetch_available_services():
     query = "SELECT DISTINCT service_name FROM dim_services ORDER BY service_name"
@@ -75,75 +87,47 @@ def fetch_summary_metrics(start_date=None, end_date=None, service_filter=None):
     JOIN dim_services s ON fb.service_id = s.service_id
     WHERE 1=1
     """
+    opp_query = """
+    SELECT 
+        COUNT(*) as count,
+        SUM(potential_savings) as savings
+    FROM optimization_recommendations rec
+    JOIN dim_resources r ON rec.resource_id = r.resource_id
+    JOIN dim_services s ON r.service_id = s.service_id
+    JOIN dim_dates d ON r.usage_start_date = d.date_id
+    WHERE 1=1
+    """
     params = []
     prev_params = []
+    opp_params = []
     
     if start_date:
         base_query += " AND d.date_id >= %s"
-        # For previous period, we need to properly cast the date and subtract interval
         prev_query += " AND d.date_id >= (DATE(%s) - INTERVAL '1 month')"
+        opp_query += " AND d.date_id >= %s"
         params.append(start_date)
         prev_params.append(start_date)
+        opp_params.append(start_date)
     
     if end_date:
         base_query += " AND d.date_id <= %s"
         prev_query += " AND d.date_id <= (DATE(%s) - INTERVAL '1 month')"
+        opp_query += " AND d.date_id <= %s"
         params.append(end_date)
         prev_params.append(end_date)
+        opp_params.append(end_date)
     
     if service_filter:
         base_query += " AND s.service_name = %s"
         prev_query += " AND s.service_name = %s"
+        opp_query += " AND s.service_name = %s"
         params.append(service_filter)
         prev_params.append(service_filter)
-    
-    # Rest of the function remains the same...
-    opportunities_query = """
-    WITH resource_metrics AS (
-        SELECT 
-            fb.resource_id,
-            s.service_name,
-            AVG(fb.cpu_utilization) as avg_cpu,
-            AVG(fb.memory_utilization) as avg_memory,
-            SUM(fb.unrounded_cost) as total_cost,
-            COUNT(DISTINCT fb.usage_start_date) as active_days,
-            (SELECT AVG(unrounded_cost) * 1.5 FROM fact_billing) as avg_cost_threshold
-        FROM fact_billing fb
-        JOIN dim_resources r ON fb.resource_id = r.resource_id
-        JOIN dim_services s ON fb.service_id = s.service_id
-        JOIN dim_dates d ON fb.usage_start_date = d.date_id
-        WHERE 1=1
-        {filters}
-        GROUP BY fb.resource_id, s.service_name
-    )
-    SELECT 
-        COUNT(*) as count,
-        SUM(CASE 
-            WHEN avg_cpu < 10 THEN total_cost * 0.5
-            WHEN avg_memory > 80 THEN total_cost * 0.1
-            WHEN total_cost > avg_cost_threshold THEN total_cost * 0.3
-            WHEN active_days < 10 THEN total_cost * 0.4
-            WHEN avg_cpu BETWEEN 10 AND 30 THEN total_cost * 0.25
-            ELSE total_cost * 0.15
-        END) as savings
-    FROM resource_metrics
-    """
-    opp_params = []
-    filters = ""
-    if start_date:
-        filters += " AND d.date_id >= %s"
-        opp_params.append(start_date)
-    if end_date:
-        filters += " AND d.date_id <= %s"
-        opp_params.append(end_date)
-    if service_filter:
-        filters += " AND s.service_name = %s"
         opp_params.append(service_filter)
-    opportunities_query = opportunities_query.format(filters=filters)
 
     current_result = execute_query(base_query, db_config, params)
     prev_result = execute_query(prev_query, db_config, prev_params)
-    opp_result = execute_query(opportunities_query, db_config, opp_params)
+    opp_result = execute_query(opp_query, db_config, opp_params)
 
     current_cost = float(current_result[0]['total_cost'] or 0) if current_result else 0.0
     previous_cost = float(prev_result[0]['total_cost'] or 0) if prev_result else 0.0
@@ -308,7 +292,7 @@ def fetch_top_resources(service_filter=None, start_date=None, end_date=None):
         'resource_id': row['resource_id'],
         'service_name': row['service_name'],
         'region_name': row['region_name'],
-        'total_cost': float(row['total_cost'] or random.uniform(1e5, 1e6)),
+        'total_cost': float(row['total_cost'] or 0),
         'avg_cpu': float(row['avg_cpu'] or 0),
         'avg_memory': float(row['avg_memory'] or 0),
         'optimization_potential': row['optimization_potential']
@@ -356,17 +340,6 @@ def fetch_cost_anomalies(start_date=None, end_date=None):
     LIMIT 5
     """
     data = execute_query(base_query, db_config, params)
-    if not data:
-        # Generate some sample data if no anomalies found
-        anomaly_start = datetime.strptime(start_date, '%Y-%m-%d') if start_date else datetime.now() - timedelta(days=30)
-        anomaly_end = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
-        days = (anomaly_end - anomaly_start).days
-        data = [{
-            'resource_id': f'res-{i}', 
-            'service_name': f'Service-{i}', 
-            'cost': random.uniform(1e5, 5e5), 
-            'anomaly_date': (anomaly_start + timedelta(days=random.randint(0, days))) if days > 0 else anomaly_start
-        } for i in range(1, 3)]
     return [{
         'resource_id': row['resource_id'],
         'service_name': row['service_name'],
@@ -378,29 +351,16 @@ def fetch_optimization_recommendations(page=1, per_page=25, service_filter=None,
     offset = (page - 1) * per_page
     base_query = """
     SELECT 
-        r.resource_id, 
+        rec.resource_id, 
         s.service_name,
         SUM(fb.unrounded_cost) as total_cost,
-        CASE 
-            WHEN AVG(fb.cpu_utilization) < 10 THEN 'Stop idle resource (low CPU usage). Impact: Minimal disruption.'
-            WHEN AVG(fb.memory_utilization) > 80 THEN 'Scale up memory to prevent bottlenecks. Impact: Improved performance.'
-            WHEN AVG(fb.unrounded_cost) > (SELECT AVG(unrounded_cost) * 1.5 FROM fact_billing) THEN 'Switch to reserved instances for cost efficiency. Impact: Long-term savings.'
-            WHEN COUNT(DISTINCT fb.usage_start_date) < 10 THEN 'Consolidate underutilized resources. Impact: Reduced overhead.'
-            WHEN AVG(fb.cpu_utilization) BETWEEN 10 AND 30 THEN 'Right-size instance to match workload. Impact: Cost reduction.'
-            ELSE 'Review usage patterns for optimization. Impact: Potential savings.'
-        END as recommendation_description,
-        CASE 
-            WHEN AVG(fb.cpu_utilization) < 10 THEN SUM(fb.unrounded_cost) * 0.5
-            WHEN AVG(fb.memory_utilization) > 80 THEN SUM(fb.unrounded_cost) * 0.1
-            WHEN AVG(fb.unrounded_cost) > (SELECT AVG(unrounded_cost) * 1.5 FROM fact_billing) THEN SUM(fb.unrounded_cost) * 0.3
-            WHEN COUNT(DISTINCT fb.usage_start_date) < 10 THEN SUM(fb.unrounded_cost) * 0.4
-            WHEN AVG(fb.cpu_utilization) BETWEEN 10 AND 30 THEN SUM(fb.unrounded_cost) * 0.25
-            ELSE SUM(fb.unrounded_cost) * 0.15
-        END as potential_savings
-    FROM fact_billing fb
-    JOIN dim_resources r ON fb.resource_id = r.resource_id
-    JOIN dim_services s ON fb.service_id = s.service_id
-    JOIN dim_regions reg ON fb.region_id = reg.region_id
+        rec.recommendation_description,
+        rec.potential_savings
+    FROM optimization_recommendations rec
+    JOIN dim_resources r ON rec.resource_id = r.resource_id
+    JOIN dim_services s ON r.service_id = s.service_id
+    JOIN dim_regions reg ON r.region_id = reg.region_id
+    JOIN fact_billing fb ON rec.resource_id = fb.resource_id
     JOIN dim_dates d ON fb.usage_start_date = d.date_id
     WHERE 1=1
     """
@@ -418,33 +378,24 @@ def fetch_optimization_recommendations(page=1, per_page=25, service_filter=None,
         base_query += " AND d.date_id <= %s"
         params.append(end_date)
     base_query += """
-    GROUP BY r.resource_id, s.service_name
-    ORDER BY potential_savings DESC
+    GROUP BY rec.resource_id, s.service_name, rec.recommendation_description, rec.potential_savings
+    ORDER BY rec.potential_savings DESC
     LIMIT %s OFFSET %s
     """
     params.extend([per_page, offset])
 
     count_query = """
-    SELECT COUNT(*) as total, SUM(total_cost) as total_cost, SUM(potential_savings) as total_savings
-    FROM (
-        SELECT 
-            r.resource_id, 
-            s.service_name,
-            SUM(fb.unrounded_cost) as total_cost,
-            CASE 
-                WHEN AVG(fb.cpu_utilization) < 10 THEN SUM(fb.unrounded_cost) * 0.5
-                WHEN AVG(fb.memory_utilization) > 80 THEN SUM(fb.unrounded_cost) * 0.1
-                WHEN AVG(fb.unrounded_cost) > (SELECT AVG(unrounded_cost) * 1.5 FROM fact_billing) THEN SUM(fb.unrounded_cost) * 0.3
-                WHEN COUNT(DISTINCT fb.usage_start_date) < 10 THEN SUM(fb.unrounded_cost) * 0.4
-                WHEN AVG(fb.cpu_utilization) BETWEEN 10 AND 30 THEN SUM(fb.unrounded_cost) * 0.25
-                ELSE SUM(fb.unrounded_cost) * 0.15
-            END as potential_savings
-        FROM fact_billing fb
-        JOIN dim_resources r ON fb.resource_id = r.resource_id
-        JOIN dim_services s ON fb.service_id = s.service_id
-        JOIN dim_regions reg ON fb.region_id = reg.region_id
-        JOIN dim_dates d ON fb.usage_start_date = d.date_id
-        WHERE 1=1
+    SELECT 
+        COUNT(DISTINCT rec.resource_id) as total,
+        SUM(fb.unrounded_cost) as total_cost,
+        SUM(rec.potential_savings) as total_savings
+    FROM optimization_recommendations rec
+    JOIN dim_resources r ON rec.resource_id = r.resource_id
+    JOIN dim_services s ON r.service_id = s.service_id
+    JOIN dim_regions reg ON r.region_id = reg.region_id
+    JOIN fact_billing fb ON rec.resource_id = fb.resource_id
+    JOIN dim_dates d ON fb.usage_start_date = d.date_id
+    WHERE 1=1
     """
     count_params = []
     if service_filter:
@@ -459,10 +410,6 @@ def fetch_optimization_recommendations(page=1, per_page=25, service_filter=None,
     if end_date:
         count_query += " AND d.date_id <= %s"
         count_params.append(end_date)
-    count_query += """
-        GROUP BY r.resource_id, s.service_name
-    ) subquery
-    """
 
     data = execute_query(base_query, db_config, params)
     summary = execute_query(count_query, db_config, count_params)[0]
@@ -486,11 +433,6 @@ def fetch_optimization_recommendations(page=1, per_page=25, service_filter=None,
     }
 
 def predict_monthly_costs(start_date=None, end_date=None, service_filter=None):
-    """
-    Predict costs for the next 3 months based on historical data
-    Respects date and service filters
-    """
-    # Get historical monthly costs for the filtered service/dates
     query = """
     WITH monthly_costs AS (
         SELECT 
@@ -529,33 +471,25 @@ def predict_monthly_costs(start_date=None, end_date=None, service_filter=None):
     try:
         data = execute_query(query, db_config, params)
         
-        # Need at least 2 months of data to predict
         if len(data) < 2:
             logger.warning(f"Not enough historical data ({len(data)} months) for prediction")
             return []
         
-        # Extract costs and calculate growth rates
         costs = [float(row['monthly_cost']) for row in data]
-        months = list(range(len(costs)))  # Simple numeric representation
+        months = list(range(len(costs)))
         
-        # Calculate weighted moving average (more weight to recent months)
-        weights = [0.1, 0.15, 0.25, 0.5]  # Weights for last 4 months
+        weights = [0.1, 0.15, 0.25, 0.5]
         weighted_avg = sum(c * w for c, w in zip(costs[-4:], weights[-len(costs):])) / sum(weights[-len(costs):])
         
-        # Calculate growth rates
         growth_rates = []
         for i in range(1, len(costs)):
             if costs[i-1] > 0:
                 growth_rate = (costs[i] - costs[i-1]) / costs[i-1]
                 growth_rates.append(growth_rate)
         
-        # Use average growth rate if available, otherwise small default growth
         avg_growth = sum(growth_rates)/len(growth_rates) if growth_rates else 0.05
-        
-        # Cap growth rate between -10% and +20% to prevent extreme predictions
         avg_growth = max(-0.1, min(0.2, avg_growth))
         
-        # Generate predictions for next 3 months
         last_year = int(data[-1]['year'])
         last_month = int(data[-1]['month'])
         predictions = []
@@ -567,11 +501,10 @@ def predict_monthly_costs(start_date=None, end_date=None, service_filter=None):
                 next_month -= 12
                 next_year += 1
             
-            # Apply growth to weighted average
             predicted_cost = weighted_avg * (1 + avg_growth) ** i
             predictions.append({
                 'month': f"{next_year}-{next_month:02d}",
-                'monthly_cost': max(0, predicted_cost)  # Ensure no negative predictions
+                'monthly_cost': max(0, predicted_cost)
             })
         
         logger.info(f"Generated predictions for {len(predictions)} months")
@@ -622,14 +555,12 @@ def estimate_savings(
     high_cost = float(row.get('high_cost', 0))
     total_cost = float(row.get('total_cost', 0))
 
-    # Savings with no overlap and realistic caps
     idle_elimination_savings = idle_cost * 0.5 * (idle_resource_elimination / 100)
     resource_util_savings = low_util_cost * 0.25 * (resource_utilization_reduction / 100)
     memory_scaling_savings = high_memory_cost * 0.1 * (memory_scaling_increase / 100)
-    reserved_instance_savings = high_cost * 0.3 * (reserved_instances_increase / 100)  # Only high-cost resources
+    reserved_instance_savings = high_cost * 0.3 * (reserved_instances_increase / 100)
     consolidation_savings = low_util_cost * 0.4 * (resource_consolidation / 100)
 
-    # Remove overlap: choose max between utilization and consolidation per bucket
     low_util_total_savings = max(resource_util_savings, consolidation_savings)
 
     total_savings = (
@@ -638,7 +569,6 @@ def estimate_savings(
         memory_scaling_savings +
         reserved_instance_savings
     )
-    # Cap at 50% of total cost
     total_savings = min(total_savings, total_cost * 0.5)
     new_cost = total_cost - total_savings
 
@@ -675,8 +605,8 @@ def fetch_reservation_candidates():
 def fetch_peak_usage_trends():
     query = """
     SELECT d.date_id, 
-           COALESCE(MAX(fb.cpu_utilization), RANDOM() * 100) as peak_cpu, 
-           COALESCE(MAX(fb.memory_utilization), RANDOM() * 100) as peak_memory
+           MAX(fb.cpu_utilization) as peak_cpu, 
+           MAX(fb.memory_utilization) as peak_memory
     FROM fact_billing fb
     JOIN dim_dates d ON fb.usage_start_date = d.date_id
     WHERE d.date_id >= CURRENT_DATE - INTERVAL '30 days'
@@ -684,40 +614,11 @@ def fetch_peak_usage_trends():
     ORDER BY d.date_id
     """
     data = execute_query(query, db_config)
-    if not data:
-        data = [{'date_id': (datetime.now() - timedelta(days=i)).date(), 'peak_cpu': random.uniform(20, 90), 'peak_memory': random.uniform(20, 90)} for i in range(30)]
     return [{
-        'date': row['date_id'].strftime('%Y-%m-%d'), 'peak_cpu': float(row['peak_cpu']),
-        'peak_memory': float(row['peak_memory'])
+        'date': row['date_id'].strftime('%Y-%m-%d'), 
+        'peak_cpu': float(row['peak_cpu'] or 0),
+        'peak_memory': float(row['peak_memory'] or 0)
     } for row in data]
-
-summary_metrics = fetch_summary_metrics()
-monthly_trend = fetch_monthly_trend()
-monthly_predictions = predict_monthly_costs()
-service_breakdown = fetch_service_breakdown()
-region_breakdown = fetch_region_breakdown()
-daily_trend = fetch_daily_trend()
-top_resources = fetch_top_resources()
-cost_anomalies = fetch_cost_anomalies()
-optimization_data = fetch_optimization_recommendations()
-optimization_recommendations = optimization_data['recommendations']
-what_if = estimate_savings(30, 50, 20, 10, 20)
-reservation_candidates = fetch_reservation_candidates()
-peak_usage = fetch_peak_usage_trends()
-
-monthly_labels = [get_month_name(d['month']) for d in monthly_trend]
-monthly_costs = [d['monthly_cost'] for d in monthly_trend]
-pred_labels = [get_month_name(d['month']) for d in monthly_predictions]
-pred_costs = [d['monthly_cost'] for d in monthly_predictions]
-service_labels = [d['service_name'] for d in service_breakdown]
-service_costs = [d['total_cost'] for d in service_breakdown]
-region_labels = [d['region_name'] for d in region_breakdown]
-region_costs = [d['total_cost'] for d in region_breakdown]
-daily_labels = [d['date'] for d in daily_trend]
-daily_costs = [d['daily_cost'] for d in daily_trend]
-peak_labels = [d['date'] for d in peak_usage]
-peak_cpu = [d['peak_cpu'] for d in peak_usage]
-peak_memory = [d['peak_memory'] for d in peak_usage]
 
 @app.route('/', methods=['GET', 'POST'])
 def render_dashboard():
@@ -1132,6 +1033,7 @@ def render_dashboard():
             new Chart(serviceBreakdownCtx, {{
                 type: 'pie',
                 data: {{
+
                     labels: {json.dumps(service_labels_filtered)},
                     datasets: [{{
                         data: {json.dumps(service_costs_filtered)},
@@ -1318,48 +1220,56 @@ def render_dashboard():
 
 @app.route('/get_service_resources')
 def get_service_resources():
-    service = request.args.get('service')
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    resources = fetch_top_resources(service, start_date, end_date)
-    for row in resources:
-        row['total_cost'] = format_currency(row['total_cost'])
-        row['avg_cpu'] = f"{row['avg_cpu']:.1f}%"
-        row['avg_memory'] = f"{row['avg_memory']:.1f}%"
-    return json.dumps(resources)
+    try:
+        service = request.args.get('service')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        resources = fetch_top_resources(service, start_date, end_date)
+        for row in resources:
+            row['total_cost'] = format_currency(row['total_cost'])
+            row['avg_cpu'] = f"{row['avg_cpu']:.1f}%"
+            row['avg_memory'] = f"{row['avg_memory']:.1f}%"
+        return json.dumps(resources)
+    except Exception as e:
+        logger.error(f"Failed to fetch service resources: {str(e)}")
+        return json.dumps({"error": "Failed to fetch resources"}), 500
 
 @app.route('/estimate_savings')
 def estimate_savings_route():
-    resource_utilization = float(request.args.get('resource_utilization', 30))
-    idle_resources = float(request.args.get('idle_resources', 50))
-    reserved_instances = float(request.args.get('reserved_instances', 20))
-    memory_scaling = float(request.args.get('memory_scaling', 10))
-    consolidation = float(request.args.get('consolidation', 20))
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    service_filter = request.args.get('service_filter')
-    savings = estimate_savings(
-        resource_utilization,
-        idle_resources,
-        reserved_instances,
-        memory_scaling,
-        consolidation,
-        start_date,
-        end_date,
-        service_filter
-    )
-    savings_percentage = (savings['total_estimated_savings'] / savings['original_cost'] * 100) if savings['original_cost'] > 0 else 0.0
-    return json.dumps({
-        'original_cost': format_currency(savings['original_cost']),
-        'new_estimated_cost': format_currency(savings['new_estimated_cost']),
-        'total_estimated_savings': format_currency(savings['total_estimated_savings']),
-        'savings_percentage': f"{savings_percentage:.1f}%",
-        'resource_utilization_savings': format_currency(savings['resource_utilization_savings']),
-        'idle_elimination_savings': format_currency(savings['idle_elimination_savings']),
-        'reserved_instance_savings': format_currency(savings['reserved_instance_savings']),
-        'memory_scaling_savings': format_currency(savings['memory_scaling_savings']),
-        'consolidation_savings': format_currency(savings['consolidation_savings'])
-    })
+    try:
+        resource_utilization = float(request.args.get('resource_utilization', 30))
+        idle_resources = float(request.args.get('idle_resources', 50))
+        reserved_instances = float(request.args.get('reserved_instances', 20))
+        memory_scaling = float(request.args.get('memory_scaling', 10))
+        consolidation = float(request.args.get('consolidation', 20))
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        service_filter = request.args.get('service_filter')
+        savings = estimate_savings(
+            resource_utilization,
+            idle_resources,
+            reserved_instances,
+            memory_scaling,
+            consolidation,
+            start_date,
+            end_date,
+            service_filter
+        )
+        savings_percentage = (savings['total_estimated_savings'] / savings['original_cost'] * 100) if savings['original_cost'] > 0 else 0.0
+        return json.dumps({
+            'original_cost': format_currency(savings['original_cost']),
+            'new_estimated_cost': format_currency(savings['new_estimated_cost']),
+            'total_estimated_savings': format_currency(savings['total_estimated_savings']),
+            'savings_percentage': f"{savings_percentage:.1f}%",
+            'resource_utilization_savings': format_currency(savings['resource_utilization_savings']),
+            'idle_elimination_savings': format_currency(savings['idle_elimination_savings']),
+            'reserved_instance_savings': format_currency(savings['reserved_instance_savings']),
+            'memory_scaling_savings': format_currency(savings['memory_scaling_savings']),
+            'consolidation_savings': format_currency(savings['consolidation_savings'])
+        })
+    except Exception as e:
+        logger.error(f"Failed to estimate savings: {str(e)}")
+        return json.dumps({"error": "Failed to estimate savings"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=8051, use_reloader=False)
