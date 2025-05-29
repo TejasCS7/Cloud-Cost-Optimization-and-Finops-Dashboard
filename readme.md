@@ -49,8 +49,7 @@ Cloud-FinOps-Dashboard/
 │   └── main.py               
 ├── 📊 data/  
 |   ├── raw_dataset.csv
-|   └── processed_dataset.csv               
-├── 📥 setup.py                 
+|   └── processed_dataset.csv                               
 └── 📋 requirements.txt        
 ```
 
