@@ -116,5 +116,5 @@ python src/main.py
 
 ### 💡 Project Philosophy
 
-In an era of cloud complexity, our dashboard transforms raw billing data into strategic insights. We don't just analyze costs—we unlock financial potential.
+In an era of cloud complexity, My dashboard transforms raw billing data into strategic insights. I don't just analyze costs—we unlock financial potential.
 
