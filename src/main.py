@@ -43,6 +43,7 @@ class FinOpsWorkflow:
         """Step 2: Set up database and load data."""
         logger.info("Starting database setup...")
         try:
+            # Fix: Pass no named parameters
             # Set environment variables for both CSV file and DB config
             os.environ['CSV_FILE_PATH'] = csv_file
             os.environ['DB_HOST'] = self.db_config['host']
@@ -91,25 +92,30 @@ class FinOpsWorkflow:
         start_time = datetime.now()
         logger.info("Starting Cloud FinOps workflow...")
         
-        # Step 1: Data Ingestion
-        clean_data, headers = self.run_data_ingestion()
-        
-        # Step 2: Database Setup with processed data
-        self.run_database_setup(self.processed_file)
-        
-        # Step 3: Cost Analysis
-        recommendations, summary = self.run_cost_analysis()
-        
-        # Log summary information
-        if summary:
-            logger.info(f"Potential savings: ${summary.get('potential_savings', 0):.2f}")
-            logger.info(f"Cost trend: {summary.get('trend_percentage', 0):.1f}%")
-        
-        # Step 4: Dashboard (runs indefinitely until stopped)
-        self.run_dashboard()
-        
-        end_time = datetime.now()
-        logger.info(f"Workflow completed in {end_time - start_time}")
+        try:
+            # Step 1: Data Ingestion
+            clean_data, headers = self.run_data_ingestion()
+            
+            # Step 2: Database Setup with processed data
+            self.run_database_setup(self.processed_file)
+            
+            # Step 3: Cost Analysis
+            recommendations, summary = self.run_cost_analysis()
+            
+            # Log summary information
+            if summary:
+                logger.info(f"Potential savings: ${summary.get('potential_savings', 0):.2f}")
+                logger.info(f"Cost trend: {summary.get('trend_percentage', 0):.1f}%")
+            
+            # Step 4: Dashboard (runs indefinitely until stopped)
+            self.run_dashboard()
+            
+        except Exception as e:
+            logger.error(f"Workflow failed at step: {str(e)}")
+            raise
+        finally:
+            end_time = datetime.now()
+            logger.info(f"Workflow completed in {end_time - start_time}")
 
 def main():
     # Configuration - should match all other files
@@ -122,8 +128,9 @@ def main():
         'port': '5432'
     }
     
-    # Ensure Data directory exists
+    # Ensure directories exist
     os.makedirs('Data', exist_ok=True)
+    os.makedirs('logs', exist_ok=True)
     
     # Validate input file exists
     if not os.path.exists(input_file):
