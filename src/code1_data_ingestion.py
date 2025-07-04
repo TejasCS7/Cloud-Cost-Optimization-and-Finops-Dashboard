@@ -1,25 +1,7 @@
 import csv
 from datetime import datetime
 import os
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Service category mapping
-SERVICE_CATEGORIES = {
-    'Compute Engine': 'Compute',
-    'Cloud Storage': 'Storage',
-    'BigQuery': 'Analytics',
-    # Add more mappings as needed
-}
-
-# Overprovisioning thresholds (configurable)
-OVERPROVISIONING_THRESHOLDS = {
-    'cpu_util': 30,
-    'mem_util': 30,
-    'cost': 100
-}
+import sys
 
 def clean_cost_data(data, headers):
     """
@@ -41,7 +23,7 @@ def clean_cost_data(data, headers):
             start_date = datetime.strptime(row['Usage Start Date'], '%d-%m-%Y %H:%M')
             end_date = datetime.strptime(row['Usage End Date'], '%d-%m-%Y %H:%M')
         except Exception as e:
-            logging.warning(f"Date conversion failed for row {row['Resource ID']} - {str(e)}. Using None.")
+            print(f"Warning: Date conversion failed for row {row['Resource ID']} - {str(e)}. Using None.")
             start_date = None
             end_date = None
 
@@ -55,7 +37,7 @@ def clean_cost_data(data, headers):
 
         # Calculate Cost Per Hour with division by zero protection
         unrounded_cost = float(row['Unrounded Cost ($)']) if row['Unrounded Cost ($)'] else 0
-        cost_per_hour = unrounded_cost / usage_duration_hours if usage_duration_hours > 0 else 0
+        cost_per_hour = unrounded_cost / usage_duration_hours if usage_duration_hours > 0 else None
         new_row['Cost Per Hour'] = cost_per_hour
 
         # Extract time-based features
@@ -69,9 +51,12 @@ def clean_cost_data(data, headers):
         # Clean Resource ID
         new_row['Resource ID'] = row['Resource ID'].strip()
 
-        # Extract service category using mapping
+        # Extract service category with error handling
         service_name = row['Service Name']
-        new_row['Service Category'] = SERVICE_CATEGORIES.get(service_name, 'Unknown')
+        if isinstance(service_name, str) and len(service_name.split()) > 1:
+            new_row['Service Category'] = service_name.split()[1]
+        else:
+            new_row['Service Category'] = service_name
 
         # Normalize utilization metrics
         try:
@@ -95,19 +80,15 @@ def clean_cost_data(data, headers):
 
         # Calculate Cost per GB Transferred with division by zero protection
         total_network_gb = inbound_gb + outbound_gb
-        cost_per_gb = unrounded_cost / total_network_gb if total_network_gb > 0 else 0
+        cost_per_gb = unrounded_cost / total_network_gb if total_network_gb > 0 else None
         new_row['Cost per GB Transferred'] = cost_per_gb
 
-        # Flag potentially over-provisioned resources
-        if cpu_util is None or mem_util is None:
-            new_row['Is Overprovisioned'] = 'Unknown'
-        else:
-            is_overprovisioned = (
-                cpu_util < OVERPROVISIONING_THRESHOLDS['cpu_util'] and
-                mem_util < OVERPROVISIONING_THRESHOLDS['mem_util'] and
-                unrounded_cost > OVERPROVISIONING_THRESHOLDS['cost']
-            )
-            new_row['Is Overprovisioned'] = is_overprovisioned
+        # Flag potentially over-provisioned resources with null checks
+        cpu_util = cpu_util if cpu_util is not None else 100
+        mem_util = mem_util if mem_util is not None else 100
+        cost = unrounded_cost if unrounded_cost is not None else 0
+        is_overprovisioned = (cpu_util < 30) and (mem_util < 30) and (cost > 100)
+        new_row['Is Overprovisioned'] = is_overprovisioned
 
         processed_data.append(new_row)
 
@@ -141,40 +122,43 @@ def ingest_billing_data(file_path):
     # Clean data
     clean_data, new_headers = clean_cost_data(data, headers)
 
-    # Remove duplicates based on Resource ID and Usage Start Date
+    # Remove duplicates (based on all columns)
     seen = set()
     unique_data = []
     for row in clean_data:
-        key = (row['Resource ID'], row['Usage Start Date'])
-        if key not in seen:
-            seen.add(key)
+        row_tuple = tuple(row.items())
+        if row_tuple not in seen:
+            seen.add(row_tuple)
             unique_data.append(row)
 
-    logging.info(f"Ingested {len(unique_data)} billing records")
+    print(f"Ingested {len(unique_data)} billing records")
     return unique_data, new_headers
 
-def main(file_path='/Users/tejasg/Documents/MyProjects/Cloud-FinOps Dashboard/Cloud Cost Optimization & FinOps Dashboard/Data/gcp_billing_datasets.csv'):
+def main(file_path='/Users/tejasg/Downloads/xyx/Data/gcp_billing_datasets.csv'):
     """
     Main function to ingest and preprocess data
     """
     if not os.path.exists(file_path):
-        logging.error(f"File {file_path} not found")
-        return
+        print(f"Error: File {file_path} not found")
+        return None
 
     try:
         # Ingest and clean data
         clean_data, headers = ingest_billing_data(file_path)
-        logging.info(f"Data preprocessing complete. Records: {len(clean_data)}")
+        print(f"Data preprocessing complete. Records: {len(clean_data)}")
 
         # Save the processed data
-        processed_path = '/Users/tejasg/Documents/MyProjects/Cloud-FinOps Dashboard/Cloud Cost Optimization & FinOps Dashboard/Data/processed_billing_data.csv'
+        processed_path = '/Users/tejasg/Downloads/xyx/Data/processed_billing_data.csv'
         with open(processed_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=headers)
             writer.writeheader()
             writer.writerows(clean_data)
-        logging.info(f"Processed data saved to {processed_path}")
+        print(f"Processed data saved to {processed_path}")
+
+        return clean_data, headers
     except Exception as e:
-        logging.error(f"Error during data ingestion: {str(e)}")
+        print(f"Error during data ingestion: {str(e)}")
+        return None
 
 if __name__ == "__main__":
     main()
