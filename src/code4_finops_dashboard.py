@@ -5,7 +5,6 @@ from psycopg2.extras import RealDictCursor
 import json
 from datetime import datetime, date, timedelta
 import calendar
-import random
 
 app = Flask(__name__)
 
@@ -80,7 +79,6 @@ def fetch_summary_metrics(start_date=None, end_date=None, service_filter=None):
     
     if start_date:
         base_query += " AND d.date_id >= %s"
-        # For previous period, we need to properly cast the date and subtract interval
         prev_query += " AND d.date_id >= (DATE(%s) - INTERVAL '1 month')"
         params.append(start_date)
         prev_params.append(start_date)
@@ -97,7 +95,6 @@ def fetch_summary_metrics(start_date=None, end_date=None, service_filter=None):
         params.append(service_filter)
         prev_params.append(service_filter)
     
-    # Rest of the function remains the same...
     opportunities_query = """
     WITH resource_metrics AS (
         SELECT 
@@ -308,7 +305,7 @@ def fetch_top_resources(service_filter=None, start_date=None, end_date=None):
         'resource_id': row['resource_id'],
         'service_name': row['service_name'],
         'region_name': row['region_name'],
-        'total_cost': float(row['total_cost'] or random.uniform(1e5, 1e6)),
+        'total_cost': float(row['total_cost'] or 0),
         'avg_cpu': float(row['avg_cpu'] or 0),
         'avg_memory': float(row['avg_memory'] or 0),
         'optimization_potential': row['optimization_potential']
@@ -356,21 +353,10 @@ def fetch_cost_anomalies(start_date=None, end_date=None):
     LIMIT 5
     """
     data = execute_query(base_query, db_config, params)
-    if not data:
-        # Generate some sample data if no anomalies found
-        anomaly_start = datetime.strptime(start_date, '%Y-%m-%d') if start_date else datetime.now() - timedelta(days=30)
-        anomaly_end = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
-        days = (anomaly_end - anomaly_start).days
-        data = [{
-            'resource_id': f'res-{i}', 
-            'service_name': f'Service-{i}', 
-            'cost': random.uniform(1e5, 5e5), 
-            'anomaly_date': (anomaly_start + timedelta(days=random.randint(0, days))) if days > 0 else anomaly_start
-        } for i in range(1, 3)]
     return [{
         'resource_id': row['resource_id'],
         'service_name': row['service_name'],
-        'cost': float(row['cost']),
+        'cost': float(row['cost'] or 0),
         'anomaly_date': row['anomaly_date'].strftime('%Y-%m-%d') if isinstance(row['anomaly_date'], date) else row['anomaly_date']
     } for row in data]
 
@@ -675,8 +661,8 @@ def fetch_reservation_candidates():
 def fetch_peak_usage_trends():
     query = """
     SELECT d.date_id, 
-           COALESCE(MAX(fb.cpu_utilization), RANDOM() * 100) as peak_cpu, 
-           COALESCE(MAX(fb.memory_utilization), RANDOM() * 100) as peak_memory
+           MAX(fb.cpu_utilization) as peak_cpu, 
+           MAX(fb.memory_utilization) as peak_memory
     FROM fact_billing fb
     JOIN dim_dates d ON fb.usage_start_date = d.date_id
     WHERE d.date_id >= CURRENT_DATE - INTERVAL '30 days'
@@ -684,49 +670,31 @@ def fetch_peak_usage_trends():
     ORDER BY d.date_id
     """
     data = execute_query(query, db_config)
-    if not data:
-        data = [{'date_id': (datetime.now() - timedelta(days=i)).date(), 'peak_cpu': random.uniform(20, 90), 'peak_memory': random.uniform(20, 90)} for i in range(30)]
     return [{
-        'date': row['date_id'].strftime('%Y-%m-%d'), 'peak_cpu': float(row['peak_cpu']),
-        'peak_memory': float(row['peak_memory'])
+        'date': row['date_id'].strftime('%Y-%m-%d'), 
+        'peak_cpu': float(row['peak_cpu'] or 0),
+        'peak_memory': float(row['peak_memory'] or 0)
     } for row in data]
-
-summary_metrics = fetch_summary_metrics()
-monthly_trend = fetch_monthly_trend()
-monthly_predictions = predict_monthly_costs()
-service_breakdown = fetch_service_breakdown()
-region_breakdown = fetch_region_breakdown()
-daily_trend = fetch_daily_trend()
-top_resources = fetch_top_resources()
-cost_anomalies = fetch_cost_anomalies()
-optimization_data = fetch_optimization_recommendations()
-optimization_recommendations = optimization_data['recommendations']
-what_if = estimate_savings(30, 50, 20, 10, 20)
-reservation_candidates = fetch_reservation_candidates()
-peak_usage = fetch_peak_usage_trends()
-
-monthly_labels = [get_month_name(d['month']) for d in monthly_trend]
-monthly_costs = [d['monthly_cost'] for d in monthly_trend]
-pred_labels = [get_month_name(d['month']) for d in monthly_predictions]
-pred_costs = [d['monthly_cost'] for d in monthly_predictions]
-service_labels = [d['service_name'] for d in service_breakdown]
-service_costs = [d['total_cost'] for d in service_breakdown]
-region_labels = [d['region_name'] for d in region_breakdown]
-region_costs = [d['total_cost'] for d in region_breakdown]
-daily_labels = [d['date'] for d in daily_trend]
-daily_costs = [d['daily_cost'] for d in daily_trend]
-peak_labels = [d['date'] for d in peak_usage]
-peak_cpu = [d['peak_cpu'] for d in peak_usage]
-peak_memory = [d['peak_memory'] for d in peak_usage]
 
 @app.route('/', methods=['GET', 'POST'])
 def render_dashboard():
+    # Get all filter parameters from the request
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     global_service_filter = request.args.get('service_filter')
-    page = int(request.args.get('rec_page', 1))
     rec_service_filter = request.args.get('rec_service_filter')
     region_filter = request.args.get('region_filter')
+    page = int(request.args.get('rec_page', 1))
+    
+    # Fetch data with all filters
+    optimization_data = fetch_optimization_recommendations(
+        page=page,
+        per_page=25,
+        service_filter=rec_service_filter,
+        region_filter=region_filter,
+        start_date=start_date,
+        end_date=end_date
+    )
 
     summary_metrics_filtered = fetch_summary_metrics(start_date, end_date, global_service_filter)
     monthly_trend_filtered = fetch_monthly_trend(start_date, end_date, global_service_filter)
@@ -916,7 +884,7 @@ def render_dashboard():
                     </div>
                 </div>
                 ''' for anomaly in cost_anomalies_filtered
-            ]) if cost_anomalies_filtered else '<p>No cost anomalies detected in the past 7 days.</p>'}
+            ]) if cost_anomalies_filtered else '<p>No cost anomalies detected in the selected period.</p>'}
         </div>
 
         <div class="container table-section">
@@ -1008,19 +976,43 @@ def render_dashboard():
                 <nav aria-label="Recommendations pagination">
                     <ul class="pagination">
                         <li class="page-item {'disabled' if current_page == 1 else ''}">
-                            <a class="page-link" href="?rec_page={current_page - 1}&start_date={start_date or ''}&end_date={end_date or ''}&service_filter={global_service_filter or ''}&rec_service_filter={rec_service_filter or ''}®ion_filter={region_filter or ''}" {'aria-disabled="true" tabindex="-1"' if current_page == 1 else ''}>Previous</a>
+                            <a class="page-link" href="?{'&'.join([
+                                f'rec_page={current_page - 1}',
+                                f'start_date={start_date}' if start_date else '',
+                                f'end_date={end_date}' if end_date else '',
+                                f'service_filter={global_service_filter}' if global_service_filter else '',
+                                f'rec_service_filter={rec_service_filter}' if rec_service_filter else '',
+                                f'region_filter={region_filter}' if region_filter else ''
+                            ])}" {'aria-disabled="true" tabindex="-1"' if current_page == 1 else ''}>Previous</a>
                         </li>
+                        
                         {"".join([
-                            f'<li class="page-item {"active" if i == current_page else ""}"><a class="page-link" href="?rec_page={i}&start_date={start_date or ""}&end_date={end_date or ""}&service_filter={global_service_filter or ""}&rec_service_filter={rec_service_filter or ""}®ion_filter={region_filter or ""}">{i}</a></li>'
-                            for i in range(max(1, current_page - 2), min(total_pages + 1, current_page + 3))
+                            f'<li class="page-item {"active" if i == current_page else ""}">'
+                            f'<a class="page-link" href="?{"&".join([
+                                f"rec_page={i}",
+                                f"start_date={start_date}" if start_date else "",
+                                f"end_date={end_date}" if end_date else "",
+                                f"service_filter={global_service_filter}" if global_service_filter else "",
+                                f"rec_service_filter={rec_service_filter}" if rec_service_filter else "",
+                                f"region_filter={region_filter}" if region_filter else ""
+                            ])}">{i}</a></li>'
+                            for i in range(1, total_pages + 1)
+                            if i <= 3 or i >= total_pages - 2 or abs(i - current_page) <= 1
                         ])}
+                        
                         <li class="page-item {'disabled' if current_page == total_pages else ''}">
-                            <a class="page-link" href="?rec_page={current_page + 1}&start_date={start_date or ''}&end_date={end_date or ''}&service_filter={global_service_filter or ''}&rec_service_filter={rec_service_filter or ''}®ion_filter={region_filter or ''}" {'aria-disabled="true" tabindex="-1"' if current_page == total_pages else ''}>Next</a>
+                            <a class="page-link" href="?{'&'.join([
+                                f'rec_page={current_page + 1}',
+                                f'start_date={start_date}' if start_date else '',
+                                f'end_date={end_date}' if end_date else '',
+                                f'service_filter={global_service_filter}' if global_service_filter else '',
+                                f'rec_service_filter={rec_service_filter}' if rec_service_filter else '',
+                                f'region_filter={region_filter}' if region_filter else ''
+                            ])}" {'aria-disabled="true" tabindex="-1"' if current_page == total_pages else ''}>Next</a>
                         </li>
                     </ul>
                 </nav>
             </div>
-        </div>
 
         <div class="container table-section">
             <h4>Reservation Candidates</h4>
